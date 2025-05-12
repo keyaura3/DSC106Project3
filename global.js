@@ -1,84 +1,101 @@
 import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7.9.0/+esm';
 
-d3.json('./Data/temp_avg_combined.json').then(data => {
-    const margin = { top: 40, right: 40, bottom: 60, left: 60 };
-    const width = 800 - margin.left - margin.right;
-    const height = 500 - margin.top - margin.bottom;
+const parseTime = d3.utcParse("%Y-%m-%dT%H:%M:%S.%L");
 
-    const parseTime = d3.utcParse("%Y-%m-%dT%H:%M:%S.%L");
-
+d3.json('./Data/all_mice_data.json').then(data => {
     data.forEach(d => {
         d.Time = parseTime(d.Time);
         d.Temperature = +d.Temperature;
     });
-
-    const sexes = Array.from(new Set(data.map(d => d.Sex)));
-
-    const svg = d3.select("#lineplot")
-        .attr("width", width + margin.left + margin.right)
-        .attr("height", height + margin.top + margin.bottom)
+    const width = 900, height =500,margin={top:40, right:150, bottom:60,left:60};
+    const svg =d3.select("#lineplot")
+        .attr("width", width + margin.left+margin.right)
+        .attr("height",height + margin.top+margin.bottom)
         .append("g")
         .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    const x = d3.scaleTime()
-        .domain(d3.extent(data, d => d.Time))
-        .range([0, width]);
+    const x = d3.scaleTime().range([0,width]);
+    const y =d3.scaleLinear().range([height,0]);
 
-    const y = d3.scaleLinear()
-        .domain([d3.min(data, d => d.Temperature), d3.max(data, d => d.Temperature)])
-        .range([height, 0]);
+    svg.append("g").attr("class","x-axis").attr("transform",`translate(0,${height})`);
+    svg.append("g").attr("class","y-axis");
 
-    const color = d3.scaleOrdinal()
-        .domain(sexes)
-        .range(["#e377c2", "#1f77b4"]);
+    const color = d3.scaleOrdinal(d3.schemeSet1);
 
-    const line = d3.line()
-        .x(d => x(d.Time))
-        .y(d => y(d.Temperature));
+    //dropdown
+    const femIDs = Array.from(new Set(data.filter(d => d.Sex === "Female").map(d => d.Mouse))).sort();
+    const maleIDs = Array.from(new Set(data.filter(d => d.Sex === "Male").map(d => d.Mouse))).sort();
 
-    sexes.forEach(sex => {
-        const filtered = data.filter(d => d.Sex === sex);
-
-        svg.append("path")
-            .datum(filtered)
-            .attr("fill", "none")
-            .attr("stroke", color(sex))
-            .attr("stroke-width", 1.5)
-            .attr("d", line);
+    femIDs.forEach(id => {
+        d3.select("#femaleMouse").append("option").attr("value", id).text(id);
+    });
+    maleIDs.forEach(id => {
+        d3.select("#maleMouse").append("option").attr("value", id).text(id);
     });
 
-    svg.append("g")
-        .attr("transform", `translate(0,${height})`)
-        .call(d3.axisBottom(x));
+    d3.selectAll("select").on("change", updateChart);
 
-    svg.append("g")
-        .call(d3.axisLeft(y));
+    //updating chart when mouse # is selected
+    function updateChart() {
+        const selectedFemale =d3.select("#femaleMouse").property("value");
+        const selectedMale =d3.select("#maleMouse").property("value");
 
-    //labels
-    svg.append("text")
-        .attr("x", width / 2)
-        .attr("y", height + 40)
-        .attr("text-anchor", "middle")
-        .text("Time");
+        let plotData = [];
 
-    svg.append("text")
-        .attr("transform", "rotate(-90)")
-        .attr("x", -height / 2)
-        .attr("y", -40)
-        .attr("text-anchor", "middle")
-        .text("Mean Temperature (°C)");
+        if (selectedFemale) {
+            plotData.push({ id: selectedFemale, values: data.filter(d => d.Mouse === selectedFemale) });
+        } else {
+            const femAvg =d3.groups(data.filter(d=> d.Sex==="Female"), d=> +d.Time)
+                .map(([time,entries]) =>({ Time:entries[0].Time, Temperature: d3.mean(entries, d=>d.Temperature)}));
+            plotData.push({id:"Female (Mean)", values:femAvg});
+        }
 
-    //legend
-    sexes.forEach((sex, i) => {
-        svg.append("circle")
-            .attr("cx", width - 90)
-            .attr("cy", 10 + i * 20)
-            .attr("r", 5)
-            .attr("fill", color(sex));
-        svg.append("text")
-            .attr("x", width - 70)
-            .attr("y", 15 + i * 20)
-            .text(sex)
-            .attr("alignment-baseline", "middle");
-    });
+        if (selectedMale) {
+            plotData.push({ id:selectedMale, values:data.filter(d => d.Mouse ===selectedMale)});
+        } else {
+            const maleAvg = d3.groups(data.filter(d => d.Sex === "Male"), d => +d.Time)
+                .map(([time, entries]) => ({ Time: entries[0].Time, Temperature: d3.mean(entries, d =>d.Temperature) }));
+            plotData.push({ id: "Male (Mean)", values: maleAvg });
+        }
+
+        x.domain(d3.extent(data, d=>d.Time));
+        y.domain(d3.extent(data, d => d.Temperature));
+
+        svg.select(".x-axis").call(d3.axisBottom(x));
+        svg.select(".y-axis").call(d3.axisLeft(y));
+
+        svg.selectAll(".line").remove();
+        svg.selectAll(".legend").remove();
+
+        const line = d3.line().x(d => x(d.Time)).y(d =>y(d.Temperature));
+
+        svg.selectAll(".line")
+            .data(plotData)
+            .enter()
+            .append("path")
+            .attr("class","line")
+            .attr("fill","none")
+            .attr("stroke", d=>color(d.id))
+            .attr("stroke-width",1.5)
+            .attr("d", d=>line(d.values));
+
+        //legend
+        plotData.forEach((d, i)=>{
+            svg.append("circle")
+                .attr("class", "legend")
+                .attr("cx", width+20)
+                .attr("cy", 20+ i*20)
+                .attr("r",5)
+                .attr("fill",color(d.id));
+
+            svg.append("text")
+                .attr("class","legend")
+                .attr("x",width +30)
+                .attr("y", 25 +i*20)
+                .text(d.id)
+                .attr("alignment-baseline","middle");
+        });
+    }
+
+    updateChart(); 
 });

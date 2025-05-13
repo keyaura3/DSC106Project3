@@ -70,3 +70,8 @@
   button.toggle-btn:hover {
     opacity: 0.9;
   }
+  .button-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
